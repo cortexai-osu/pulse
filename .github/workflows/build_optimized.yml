@@ -1,0 +1,45 @@
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        language: [java, kotlin, cpp, go]
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup
+        if: matrix.language == 'java' || matrix.language == 'kotlin'
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17.0.6+10'
+      - name: Setup Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+          cache-dependency-path: pulse-go/go.sum
+      - name: Build Java or Kotlin
+        if: matrix.language == 'java' || matrix.language == 'kotlin'
+        run: |
+          ./gradlew :pulse-${{ matrix.language }}:build
+          ./gradlew :pulse-${{ matrix.language }}:linuxDistTar
+          ./gradlew :pulse-${{ matrix.language }}:macosDistTar
+          ./gradlew :pulse-${{ matrix.language }}:windowsDistZip
+      - name: Build C++
+        if: matrix.language == 'cpp'
+        run: |
+          cmake -B ${{ github.workspace }}/build
+          cmake --build ${{ github.workspace }}/build --config Release --target package
+          ctest -C Release
+      - name: Build Go
+        if: matrix.language == 'go'
+        run: |
+          eval "$(${HOME}/.linuxbrew/bin/brew shellenv)"
+          brew install go-task
+          task build
+      - uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.language }}-${{ runner.os }}
+          path: pulse-${{ matrix.language }}/build/distributions/*
