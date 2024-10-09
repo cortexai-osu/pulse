@@ -5,41 +5,55 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        language: [java, kotlin, cpp, go]
+        language: [java, cpp, go]
     steps:
       - uses: actions/checkout@v3
-      - name: Setup
-        if: matrix.language == 'java' || matrix.language == 'kotlin'
-        uses: actions/setup-java@v3
+      - uses: actions/setup-java@v3
+        if: matrix.language == 'java'
         with:
           distribution: 'temurin'
           java-version: '17.0.6+10'
-      - name: Setup Go
+      - uses: actions/setup-go@v4
         if: matrix.language == 'go'
-        uses: actions/setup-go@v4
         with:
           go-version: '1.20'
           cache-dependency-path: pulse-go/go.sum
-      - name: Build Java or Kotlin
-        if: matrix.language == 'java' || matrix.language == 'kotlin'
+      - name: Build Java
+        if: matrix.language == 'java'
         run: |
-          ./gradlew :pulse-${{ matrix.language }}:build
-          ./gradlew :pulse-${{ matrix.language }}:linuxDistTar
-          ./gradlew :pulse-${{ matrix.language }}:macosDistTar
-          ./gradlew :pulse-${{ matrix.language }}:windowsDistZip
+          ./gradlew :pulse-java:build
+          ./gradlew :pulse-kotlin:linuxDistTar
+          ./gradlew :pulse-kotlin:macosDistTar
+          ./gradlew :pulse-kotlin:windowsDistZip
       - name: Build C++
         if: matrix.language == 'cpp'
         run: |
-          cmake -B ${{ github.workspace }}/build
+          cmake -B ${{ github.workspace }}/build -DCMAKE_BUILD_TYPE=Release
           cmake --build ${{ github.workspace }}/build --config Release --target package
           ctest -C Release
       - name: Build Go
         if: matrix.language == 'go'
+        working-directory: ${{ github.workspace }}/pulse-go
         run: |
-          eval "$(${HOME}/.linuxbrew/bin/brew shellenv)"
+          if: runner.os == 'Linux'
+          eval "$(${{ github.workspace }}/../linuxbrew/bin/brew shellenv)"
           brew install go-task
           task build
+          if: runner.os == 'Windows'
+          choco install go-task
+          task build
       - uses: actions/upload-artifact@v3
+        if: matrix.language == 'java'
         with:
-          name: ${{ matrix.language }}-${{ runner.os }}
-          path: pulse-${{ matrix.language }}/build/distributions/*
+          name: pulse-java
+          path: pulse-java/build/distributions/pulse-java-*.zip
+      - uses: actions/upload-artifact@v3
+        if: matrix.language == 'cpp'
+        with:
+          name: pulse-cpp-${{ runner.os }}
+          path: build/pulse-cpp-${{ runner.os }}-*.tar.gz
+      - uses: actions/upload-artifact@v3
+        if: matrix.language == 'go'
+        with:
+          name: pulse-go-${{ runner.os }}
+          path: pulse-go/build/...
