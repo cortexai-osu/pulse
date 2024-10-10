@@ -5,55 +5,85 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        language: [java, go]
+        java-version: ['17.0.6+10']
+        go-version: ['1.20']
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-java@v3
-        if: matrix.language == 'java'
+      - name: Setup Java
+        if: matrix.os != 'windows-latest'
+        uses: actions/setup-java@v3
         with:
           distribution: 'temurin'
-          java-version: '17.0.6+10'
-      - uses: actions/setup-go@v4
-        if: matrix.language == 'go'
+          java-version: ${{ matrix.java-version }}
+      - name: Setup Go
+        if: matrix.os == 'ubuntu-latest' || matrix.os == 'windows-latest'
+        uses: actions/setup-go@v4
         with:
-          go-version: '1.20'
+          go-version: ${{ matrix.go-version }}
           cache-dependency-path: pulse-go/go.sum
+      - name: Cache Gradle
+        if: matrix.os != 'windows-latest'
+        uses: actions/cache@v3
+        with:
+          path: ~/.gradle/caches
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradlew') }}
+      - name: Gradle Build
+        if: matrix.os != 'windows-latest'
+        uses: gradle/gradle-build-action@v2
       - name: Build Java
-        if: matrix.language == 'java'
-        run: |
-          ./gradlew :pulse-java:build
-          ./gradlew :pulse-kotlin:linuxDistTar
-          ./gradlew :pulse-kotlin:macosDistTar
-          ./gradlew :pulse-kotlin:windowsDistZip
-      - name: Build C++
-        if: matrix.language == 'cpp'
-        run: |
-          cmake -B ${{ github.workspace }}/build -DCMAKE_BUILD_TYPE=Release
-          cmake --build ${{ github.workspace }}/build --config Release --target package
-          ctest -C Release
-      - name: Build Go
-        if: matrix.language == 'go'
-        working-directory: ${{ github.workspace }}/pulse-go
-        run: |
-          if: runner.os == 'Linux'
-          eval "$(${{ github.workspace }}/../linuxbrew/bin/brew shellenv)"
-          brew install go-task
-          task build
-          if: runner.os == 'Windows'
-          choco install go-task
-          task build
-      - uses: actions/upload-artifact@v3
-        if: matrix.language == 'java'
+        if: matrix.os != 'windows-latest'
+        run: ./gradlew :pulse-java:build
+      - name: Upload Java Artifact
+        if: matrix.os != 'windows-latest'
+        uses: actions/upload-artifact@v3
         with:
           name: pulse-java
           path: pulse-java/build/distributions/pulse-java-*.zip
-      - uses: actions/upload-artifact@v3
-        if: matrix.language == 'cpp'
+      - name: Build Kotlin - Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: ./gradlew :pulse-kotlin:linuxDistTar
+      - name: Upload Kotlin Linux Artifact
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v3
         with:
-          name: pulse-cpp-${{ runner.os }}
-          path: build/pulse-cpp-${{ runner.os }}-*.tar.gz
-      - uses: actions/upload-artifact@v3
-        if: matrix.language == 'go'
+          name: pulse-kotlin-linux
+          path: pulse-kotlin/build/distributions/pulse-kotlin-linux-*.tar.gz
+      - name: Build Kotlin - macOS
+        if: matrix.os == 'macos-latest'
+        run: ./gradlew :pulse-kotlin:macosDistTar
+      - name: Upload Kotlin macOS Artifact
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v3
         with:
-          name: pulse-go-${{ runner.os }}
-          path: pulse-go/build/...
+          name: pulse-kotlin-macos
+          path: pulse-kotlin/build/distributions/pulse-kotlin-macos-*.tar.gz
+      - name: Build Kotlin - Windows
+        if: matrix.os == 'windows-latest'
+        run: ./gradlew :pulse-kotlin:windowsDistZip
+      - name: Upload Kotlin Windows Artifact
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v3
+        with:
+          name: pulse-kotlin-windows
+          path: pulse-kotlin/build/distributions/pulse-kotlin-windows-*.zip
+      - name: Configure CMake
+        run: cmake -B ${{ github.workspace }}/build -DCMAKE_BUILD_TYPE=Release
+      - name: Build C++
+        run: cmake --build ${{ github.workspace }}/build --config Release --target package
+      - name: Test C++
+        working-directory: ${{ github.workspace }}/build
+        run: ctest -C Release
+      - name: Upload C++ Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: pulse-cpp-${{ matrix.os }}
+          path: build/pulse-cpp-${{ matrix.os }}-*.tar.gz
+      - name: Build Go
+        run: |
+          if [[ ${{ matrix.os }} == 'windows-latest' ]]; then
+            choco install go-task
+          else
+            eval "$(${HOME}/.linuxbrew/bin/brew shellenv)"
+            brew install go-task
+          fi
+          task build
